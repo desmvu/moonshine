@@ -9,7 +9,7 @@ use smithay::backend::input::{InputTime, TabletToolDescriptor};
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::delegate_dispatch2;
-use smithay::desktop::Window;
+use smithay::desktop::{PopupKind, Window};
 use smithay::input::dnd::DndGrabHandler;
 use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
 use smithay::input::tablet::TabletSeatHandler;
@@ -453,8 +453,15 @@ impl CompositorHandler for MoonshineCompositor {
 }
 
 impl MoonshineCompositor {
-	fn popups_commit(&mut self, _surface: &WlSurface) {
-		// Popup handling can be added later.
+	fn popups_commit(&mut self, surface: &WlSurface) {
+		self.popups.commit(surface);
+		if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface)
+			&& popup.get_parent_surface().is_some()
+			&& !popup.is_initial_configure_sent()
+			&& let Err(error) = popup.send_configure()
+		{
+			tracing::warn!(?error, "Failed to send initial popup configuration");
+		}
 	}
 
 	/// Find a `Window` by its Wayland surface.
@@ -1438,6 +1445,7 @@ impl MoonshineCompositor {
 		let focus_changed = old_focused_x11 != self.focused_x11_window
 			|| old_focused_window.as_ref().and_then(|w| w.wl_surface()) != best.wl_surface();
 		if focus_changed {
+			self.dismiss_popups_for_window(old_focused_window.as_ref());
 			self.clear_dropdowns();
 		}
 
@@ -1722,6 +1730,8 @@ impl MoonshineCompositor {
 				space_windows = windows.len(),
 				"No focus candidates; clearing focus"
 			);
+			let old_window = self.focused_window.take();
+			self.dismiss_popups_for_window(old_window.as_ref());
 			if self.focused_x11_window.is_some() {
 				self.focused_x11_window = None;
 			}
@@ -1927,6 +1937,7 @@ impl XdgShellHandler for MoonshineCompositor {
 			.cloned();
 
 		if let Some(window) = window {
+			self.dismiss_popups_for_window(Some(&window));
 			self.unregister_window(&window);
 			self.space.unmap_elem(&window);
 		}
@@ -1988,16 +1999,32 @@ impl XdgShellHandler for MoonshineCompositor {
 		self.reevaluate_focus();
 	}
 
-	fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
-		// Popup handling can be added later.
+	fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+		surface.with_pending_state(|state| {
+			state.geometry = positioner.get_geometry();
+			state.positioner = positioner;
+		});
+		self.unconstrain_popup(&surface);
+		if let Err(error) = self.popups.track_popup(PopupKind::Xdg(surface)) {
+			tracing::warn!(?error, "Failed to track popup");
+		}
 	}
 
-	fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {
-		// Popup grabs can be added later.
+	fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
+		self.grab_popup(surface, seat, serial);
 	}
 
-	fn reposition_request(&mut self, _surface: PopupSurface, _positioner: PositionerState, _token: u32) {
-		// Repositioning can be added later.
+	fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
+		surface.with_pending_state(|state| {
+			state.geometry = positioner.get_geometry();
+			state.positioner = positioner;
+		});
+		self.unconstrain_popup(&surface);
+		surface.send_repositioned(token);
+	}
+
+	fn popup_destroyed(&mut self, _surface: PopupSurface) {
+		self.screen_dirty = true;
 	}
 }
 
@@ -2018,7 +2045,7 @@ impl SeatHandler for MoonshineCompositor {
 	}
 
 	fn focus_changed(&mut self, _seat: &Seat<Self>, focused: Option<&KeyboardFocusTarget>) {
-		let window_id = focused.map(|f| f.window().x11_surface().map(|x| x.window_id()));
+		let window_id = focused.and_then(|f| f.window()).and_then(|w| w.x11_surface().map(|x| x.window_id()));
 		tracing::debug!(target: "focus", window_id = ?window_id, "Keyboard focus changed");
 	}
 
