@@ -13,7 +13,9 @@ pub(super) struct InputSerials<Client> {
 
 impl<Client> Default for InputSerials<Client> {
 	fn default() -> Self {
-		Self { entries: Default::default() }
+		Self {
+			entries: Default::default(),
+		}
 	}
 }
 
@@ -26,7 +28,9 @@ impl<Client: PartialEq> InputSerials<Client> {
 	}
 
 	pub fn contains(&self, serial: u32, client: &Client) -> bool {
-		self.entries.iter().any(|(recorded, recipient)| *recorded == serial && recipient == client)
+		self.entries
+			.iter()
+			.any(|(recorded, recipient)| *recorded == serial && recipient == client)
 	}
 
 	pub fn clear(&mut self) {
