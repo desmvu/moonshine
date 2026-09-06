@@ -10,8 +10,12 @@ mod focus;
 pub(crate) mod frame;
 mod gamescope_swapchain;
 mod handlers;
+mod input_serials;
+mod popup_touch;
+mod popups;
 pub(crate) mod input;
 mod protocols;
+mod render_scene;
 mod scaling;
 mod state;
 mod x11_focus;
@@ -433,6 +437,7 @@ fn run_compositor(
 					if let Err(e) = display.dispatch_clients(state) {
 						tracing::error!("Failed to dispatch Wayland clients: {e}");
 					}
+					state.refresh_popups();
 
 					// Send deferred wp_image_description_info_v1 destructor events.
 					for info in state.deferred_info_done.drain(..) {
