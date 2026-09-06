@@ -309,8 +309,7 @@ pub(crate) fn process_input(event: CompositorInputEvent, state: &mut MoonshineCo
 		},
 		CompositorInputEvent::TouchDown { slot, x, y } => {
 			let location = normalized_pointer_location(state, x, y);
-			let under = find_surface_at(state, location);
-			state.record_input_serial(serial, under.as_ref().map(|(surface, _)| surface.clone()));
+			let under = find_surface_at(state, location).map(|(surface, origin)| (surface.into(), origin));
 			if let Some(touch) = state.seat.get_touch() {
 				touch.down(
 					state,
@@ -327,7 +326,7 @@ pub(crate) fn process_input(event: CompositorInputEvent, state: &mut MoonshineCo
 		},
 		CompositorInputEvent::TouchMove { slot, x, y } => {
 			let location = normalized_pointer_location(state, x, y);
-			let under = find_surface_at(state, location);
+			let under = find_surface_at(state, location).map(|(surface, origin)| (surface.into(), origin));
 			if let Some(touch) = state.seat.get_touch() {
 				touch.motion(
 					state,

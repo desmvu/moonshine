@@ -38,7 +38,7 @@ impl MoonshineCompositor {
 			}).unwrap_or(true))
 			&& touch.as_ref().is_none_or(|handle| handle.with_grab(|_, grab| {
 				grab.is::<PopupTouchGrab>() || (grab.is::<TouchDownGrab<Self>>()
-					&& grab.start_data().focus.as_ref().is_some_and(|(surface, _)| surface.id().same_client_as(&root.id())))
+					&& grab.start_data().focus.as_ref().is_some_and(|(surface, _)| surface.same_client_as(&root.id())))
 			}).unwrap_or(true));
 		if !valid {
 			let _ = PopupManager::dismiss_popup(&root, &kind);
@@ -62,7 +62,9 @@ impl MoonshineCompositor {
 	}
 
 	pub(super) fn dismiss_popups_for_window(&mut self, window: Option<&Window>) {
-		if let Some(grab) = &mut self.popup_grab {
+		if let Some(grab) = &mut self.popup_grab
+			&& window.is_none_or(|window| grab.keyboard_grab_start_data().focus.as_ref().and_then(|focus| focus.window()) == Some(window))
+		{
 			grab.ungrab(PopupUngrabStrategy::All);
 		}
 		if let Some(root) = window.and_then(|w| w.wl_surface()) {
@@ -71,9 +73,38 @@ impl MoonshineCompositor {
 				let _ = PopupManager::dismiss_popup(&root, &popup);
 			}
 		}
-		self.input_serials.clear();
 		self.screen_dirty = true;
 		self.reconcile_popup_grab();
+	}
+
+	/// A null-buffer unmap clears the popup's parent role data before the
+	/// compositor sees the commit. Descendants still point to that surface,
+	/// so test membership by walking down from the current grabbed popup.
+	fn current_grab_descends_from(&self, ancestor: &WlSurface) -> bool {
+		let Some(grab) = &self.popup_grab else { return false };
+		if grab.has_ended() { return false }
+		let Some(focus) = grab.current_grab() else { return false };
+		let Some(surface) = focus.wl_surface() else { return false };
+		let mut current = surface.into_owned();
+		loop {
+			if &current == ancestor { return true }
+			let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(&current) else { return false };
+			let Some(parent) = popup.get_parent_surface() else { return false };
+			current = parent;
+		}
+	}
+
+	fn dismiss_popup_branch(&mut self, root: &WlSurface, popup: &PopupKind) {
+		if self.current_grab_descends_from(popup.wl_surface()) {
+			while let Some(grab) = &mut self.popup_grab {
+				if grab.has_ended() { break }
+				let reached_target = grab.current_grab().and_then(|focus| focus.wl_surface().map(|surface| surface.as_ref() == popup.wl_surface())).unwrap_or(false);
+				grab.ungrab(PopupUngrabStrategy::Topmost);
+				if reached_target { break }
+			}
+		}
+		let _ = PopupManager::dismiss_popup(root, popup);
+		self.screen_dirty = true;
 	}
 
 	/// Reconcile immediately, not on the next input event: a client may close
@@ -143,11 +174,7 @@ impl MoonshineCompositor {
 				// Smithay resets the role's parent on a null-buffer unmap, while
 				// the xdg_popup resource itself remains alive until destroy.
 				if matches!(&kind, PopupKind::Xdg(popup) if popup.get_parent_surface().is_none()) {
-					if let Some(grab) = &mut self.popup_grab {
-						grab.ungrab(PopupUngrabStrategy::All);
-					}
-					let _ = PopupManager::dismiss_popup(&root, &kind);
-					self.screen_dirty = true;
+					self.dismiss_popup_branch(&root, &kind);
 					continue;
 				}
 				if let PopupKind::Xdg(popup) = kind

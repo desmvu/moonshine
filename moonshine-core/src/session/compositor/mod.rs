@@ -12,6 +12,7 @@ mod gamescope_swapchain;
 mod handlers;
 mod input_serials;
 mod popup_touch;
+mod popup_touch_focus;
 mod popups;
 pub(crate) mod input;
 mod protocols;
