@@ -49,12 +49,21 @@ use crate::session::compositor::state::{ClientState, MoonshineCompositor};
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
+use std::cell::Cell;
 use std::sync::{OnceLock, RwLock};
 use std::time::Instant;
 
 type AppIdCacheKey = (u32, u64);
 type AppIdCacheValue = (u32, Instant);
 type AppIdCache = RwLock<HashMap<AppIdCacheKey, AppIdCacheValue>>;
+
+/// Keep a retained toplevel role out of focus selection while its buffer is
+/// unmapped, without losing the Window needed to handle a later remap.
+#[derive(Default)]
+struct NativeWindowMapping {
+	mapped: Cell<bool>,
+	ever_mapped: Cell<bool>,
+}
 
 /// PID → app_id cache keyed on `(pid, starttime)` to avoid stale hits after
 /// PID reuse. Processes in a Steam game tree (Steam → reaper → proton → game)
@@ -401,13 +410,21 @@ impl CompositorHandler for MoonshineCompositor {
 		}
 
 		// If the surface is a toplevel, refresh the space.
-		if let Some(window) = self
+		let committed_window = self
 			.space
 			.elements()
 			.find(|w| w.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false))
-			.cloned()
-		{
+			.cloned();
+		if let Some(window) = committed_window {
 			window.on_commit();
+			let mapped = smithay::backend::renderer::utils::with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
+			window.user_data().insert_if_missing(NativeWindowMapping::default);
+			let mapping = window.user_data().get::<NativeWindowMapping>().unwrap();
+			let mapping_changed = mapping.mapped.replace(mapped) != mapped;
+			mapping.ever_mapped.set(mapping.ever_mapped.get() || mapped);
+			if mapping_changed && !mapped {
+				self.dismiss_popups_for_window(Some(&window));
+			}
 
 			// wlroots' wayland backend drops the size from the initial
 			// configure (output not enabled yet); re-send it on each
@@ -437,6 +454,9 @@ impl CompositorHandler for MoonshineCompositor {
 					meta.outdated_interactive_focus = false;
 					self.focus_state.mark_dirty();
 				}
+			}
+			if mapping_changed {
+				self.reevaluate_focus();
 			}
 		}
 
@@ -973,6 +993,17 @@ impl MoonshineCompositor {
 		let steam_controlled = self.e_strategy() == VirtualConnectorStrategy::SteamControlled;
 		let mut candidates = Vec::new();
 		for window in windows {
+			// A null-buffer unmap (e.g. during popup teardown) can leave a
+			// native Wayland window briefly mapped-but-unmapped; skip it as a
+			// focus candidate rather than racing the real unmap.
+			if window
+				.user_data()
+				.get::<NativeWindowMapping>()
+				.is_some_and(|state| state.ever_mapped.get() && !state.mapped.get())
+			{
+				continue;
+			}
+
 			let Some(meta) = self.window_metadata.get(window) else {
 				continue;
 			};
@@ -1445,6 +1476,7 @@ impl MoonshineCompositor {
 		let focus_changed = old_focused_x11 != self.focused_x11_window
 			|| old_focused_window.as_ref().and_then(|w| w.wl_surface()) != best.wl_surface();
 		if focus_changed {
+			self.input_serials.clear();
 			self.dismiss_popups_for_window(old_focused_window.as_ref());
 			self.clear_dropdowns();
 		}
@@ -1730,6 +1762,7 @@ impl MoonshineCompositor {
 				space_windows = windows.len(),
 				"No focus candidates; clearing focus"
 			);
+			self.input_serials.clear();
 			let old_window = self.focused_window.take();
 			self.dismiss_popups_for_window(old_window.as_ref());
 			if self.focused_x11_window.is_some() {
@@ -2033,7 +2066,7 @@ impl XdgShellHandler for MoonshineCompositor {
 impl SeatHandler for MoonshineCompositor {
 	type KeyboardFocus = KeyboardFocusTarget;
 	type PointerFocus = WlSurface;
-	type TouchFocus = WlSurface;
+	type TouchFocus = super::popup_touch_focus::TouchFocusTarget;
 
 	fn seat_state(&mut self) -> &mut SeatState<Self> {
 		&mut self.seat_state

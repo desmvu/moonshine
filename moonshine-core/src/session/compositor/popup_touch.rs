@@ -10,11 +10,12 @@ use smithay::input::touch::{
 	DefaultGrab, DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent,
 	TouchGrab, TouchInnerHandle, UpEvent,
 };
-use smithay::reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface};
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::state::MoonshineCompositor;
+use super::popup_touch_focus::TouchFocusTarget;
 
 #[derive(Debug)]
 pub(super) struct PopupTouchGrab {
@@ -29,7 +30,7 @@ impl PopupTouchGrab {
 			start_data: GrabStartData {
 				// Keep the grab alive until its root is destroyed, even when the
 				// submenu that was current at installation has gone away.
-				focus: popup_grab.pointer_grab_start_data().focus.clone(),
+				focus: popup_grab.pointer_grab_start_data().focus.clone().map(|(surface, origin)| (surface.into(), origin)),
 				slot: TouchSlot::from(None),
 				location: (0.0, 0.0).into(),
 			},
@@ -48,7 +49,7 @@ impl TouchGrab<MoonshineCompositor> for PopupTouchGrab {
 		&mut self,
 		data: &mut MoonshineCompositor,
 		handle: &mut TouchInnerHandle<'_, MoonshineCompositor>,
-		focus: Option<(WlSurface, Point<f64, Logical>)>,
+		focus: Option<(TouchFocusTarget, Point<f64, Logical>)>,
 		event: &DownEvent,
 	) {
 		if self.popup_grab.has_ended() {
@@ -84,7 +85,7 @@ impl TouchGrab<MoonshineCompositor> for PopupTouchGrab {
 		&mut self,
 		data: &mut MoonshineCompositor,
 		handle: &mut TouchInnerHandle<'_, MoonshineCompositor>,
-		focus: Option<(WlSurface, Point<f64, Logical>)>,
+		focus: Option<(TouchFocusTarget, Point<f64, Logical>)>,
 		event: &MotionEvent,
 	) {
 		self.finish_if_ended(data, handle);
