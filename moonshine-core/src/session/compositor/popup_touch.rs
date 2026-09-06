@@ -7,15 +7,15 @@
 use smithay::backend::input::TouchSlot;
 use smithay::desktop::{PopupGrab, PopupUngrabStrategy};
 use smithay::input::touch::{
-	DefaultGrab, DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent,
-	TouchGrab, TouchInnerHandle, UpEvent,
+	DefaultGrab, DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle,
+	UpEvent,
 };
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
 
-use super::state::MoonshineCompositor;
 use super::popup_touch_focus::TouchFocusTarget;
+use super::state::MoonshineCompositor;
 
 #[derive(Debug)]
 pub(super) struct PopupTouchGrab {
@@ -30,14 +30,22 @@ impl PopupTouchGrab {
 			start_data: GrabStartData {
 				// Keep the grab alive until its root is destroyed, even when the
 				// submenu that was current at installation has gone away.
-				focus: popup_grab.pointer_grab_start_data().focus.clone().map(|(surface, origin)| (surface.into(), origin)),
+				focus: popup_grab
+					.pointer_grab_start_data()
+					.focus
+					.clone()
+					.map(|(surface, origin)| (surface.into(), origin)),
 				slot: TouchSlot::from(None),
 				location: (0.0, 0.0).into(),
 			},
 		}
 	}
 
-	fn finish_if_ended(&mut self, data: &mut MoonshineCompositor, handle: &mut TouchInnerHandle<'_, MoonshineCompositor>) {
+	fn finish_if_ended(
+		&mut self,
+		data: &mut MoonshineCompositor,
+		handle: &mut TouchInnerHandle<'_, MoonshineCompositor>,
+	) {
 		if self.popup_grab.has_ended() {
 			handle.unset_grab(self, data);
 		}
@@ -59,9 +67,9 @@ impl TouchGrab<MoonshineCompositor> for PopupTouchGrab {
 		}
 
 		let same_client = focus.as_ref().is_some_and(|(surface, _)| {
-			self.popup_grab.current_grab().is_some_and(|grab| {
-				grab.wl_surface().is_some_and(|root| surface.same_client_as(&root.id()))
-			})
+			self.popup_grab
+				.current_grab()
+				.is_some_and(|grab| grab.wl_surface().is_some_and(|root| surface.same_client_as(&root.id())))
 		});
 		if same_client {
 			handle.down(data, focus, event);

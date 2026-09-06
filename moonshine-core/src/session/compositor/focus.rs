@@ -2,7 +2,7 @@
 //!
 //! Two concerns are handled here:
 //!
-//! 1. **KeyboardFocusTarget** — A wrapper around `Window` that implements
+//! 1. **KeyboardFocusTarget** — A window or grabbed native popup that implements
 //!    Smithay's `KeyboardTarget`, `IsAlive`, and `WaylandFocus` traits.
 //!    This is the type used by Smithay's seat keyboard focus system.
 //!
@@ -32,7 +32,7 @@ use crate::session::compositor::state::MoonshineCompositor;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KeyboardFocusTarget {
 	Window(Window),
-	Popup(PopupKind),
+	Popup(Box<PopupKind>),
 }
 
 impl KeyboardFocusTarget {
@@ -74,7 +74,7 @@ impl From<Window> for KeyboardFocusTarget {
 
 impl From<PopupKind> for KeyboardFocusTarget {
 	fn from(popup: PopupKind) -> Self {
-		Self::Popup(popup)
+		Self::Popup(Box::new(popup))
 	}
 }
 

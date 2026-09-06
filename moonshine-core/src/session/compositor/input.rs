@@ -819,9 +819,9 @@ pub(super) fn find_surface_at(
 		// Native menus remain composed above a WSI bypass surface. Hit-test
 		// exactly those visible trees, excluding menus belonging to other roots.
 		for (surface, origin) in state.popup_surfaces_for_render() {
-			if let Some((surface, offset)) = smithay::desktop::utils::under_from_surface_tree(
-				&surface, position, origin, WindowSurfaceType::ALL,
-			) {
+			if let Some((surface, offset)) =
+				smithay::desktop::utils::under_from_surface_tree(&surface, position, origin, WindowSurfaceType::ALL)
+			{
 				return Some((surface, offset.to_f64()));
 			}
 		}

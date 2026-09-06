@@ -1330,9 +1330,10 @@ impl MoonshineCompositor {
 
 		let (sync, render_states) = match render_result {
 			Ok(r) => (r.sync, r.states),
-			Err(smithay::backend::renderer::damage::Error::OutputNoMode(_)) => {
-				(smithay::backend::renderer::sync::SyncPoint::signaled(), RenderElementStates::default())
-			},
+			Err(smithay::backend::renderer::damage::Error::OutputNoMode(_)) => (
+				smithay::backend::renderer::sync::SyncPoint::signaled(),
+				RenderElementStates::default(),
+			),
 			Err(e) => {
 				tracing::error!("Failed to render output: {e}");
 				return;
