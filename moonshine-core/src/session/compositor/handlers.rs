@@ -545,6 +545,65 @@ impl MoonshineCompositor {
 		false
 	}
 
+	/// Validate and register a dropdown/override window with the compositor.
+	///
+	/// Shared by `mapped_override_redirect_window` (first map) and
+	/// `configure_notify` (a later resize/reposition of an already-mapped
+	/// override-redirect window). Toolkits like Qt/GTK often map a popup at a
+	/// degenerate 1x1 stub geometry and only send its real size in a
+	/// follow-up `ConfigureRequest`; `is_dropdown()`/`is_useless()` reject
+	/// that stub, so without re-checking on `configure_notify` the popup
+	/// would never get registered once it reaches its real size.
+	fn try_register_dropdown(&mut self, win: &Window, location: Point<i32, Logical>) {
+		// Re-read metadata (freshest geometry/classification).
+		let Some(meta) = self.window_metadata.get(win) else {
+			return;
+		};
+		if !(meta.is_dropdown() && self.is_transient_of_focused(win.x11_surface().map(|x| x.window_id()).unwrap_or(0)))
+		{
+			return;
+		}
+
+		// Already registered as the active override window; avoid re-sending
+		// the synthetic pointer motion and re-logging on every trivial resize.
+		if self.override_window.as_ref() == Some(win) {
+			return;
+		}
+
+		// Validate the dropdown is on-screen (Task 3.1).
+		let output_size = self
+			.output
+			.current_mode()
+			.map(|m| m.size)
+			.unwrap_or((self.width as i32, self.height as i32).into());
+		let geo = &meta.geometry;
+		let on_screen = geo.loc.x + geo.size.w > 0
+			&& geo.loc.x < output_size.w
+			&& geo.loc.y + geo.size.h > 0
+			&& geo.loc.y < output_size.h;
+		if !on_screen {
+			tracing::debug!(
+				target: "focus",
+				window_id = win.x11_surface().map(|x| x.window_id()),
+				"Rejecting dropdown: off-screen"
+			);
+			return;
+		}
+
+		// Ensure notification/external-overlay classification is up to date
+		// before notify_dropdown checks for conflicts with those windows.
+		let windows: Vec<_> = self.space.elements().cloned().collect();
+		self.classify_special_windows(&windows);
+
+		// Register the dropdown with the compositor state.
+		// This checks for conflicts with notification/external overlay windows.
+		// Do NOT give keyboard focus to the dropdown — keyboard focus
+		// stays on the previously focused window (keyboard focus
+		// persistence). Gamescope keeps keyboard focus on the main game
+		// window while dropdowns only receive pointer events.
+		let _ = self.notify_dropdown(win.clone(), location.x, location.y);
+	}
+
 	/// Apply a fullscreen state change requested by an X11 client.
 	///
 	/// Smithay's `XwmHandler` defaults are no-ops, so without this
@@ -2470,41 +2529,7 @@ impl XwmHandler for MoonshineCompositor {
 		// tooltips) appear on top while the primary focus remains on
 		// the main game window. Gamescope: `wlserver_notify_dropdown()`.
 		if is_focused_child && is_dropdown {
-			// Re-read metadata from map.
-			let meta = self.window_metadata.get(&win).expect("metadata was just inserted");
-
-			// Validate the dropdown is on-screen (Task 3.1).
-			let output_size = self
-				.output
-				.current_mode()
-				.map(|m| m.size)
-				.unwrap_or((self.width as i32, self.height as i32).into());
-			let geo = &meta.geometry;
-			let on_screen = geo.loc.x + geo.size.w > 0
-				&& geo.loc.x < output_size.w
-				&& geo.loc.y + geo.size.h > 0
-				&& geo.loc.y < output_size.h;
-			if !on_screen {
-				tracing::debug!(
-					target: "focus",
-					window_id = win.x11_surface().map(|x| x.window_id()),
-					"Rejecting dropdown: off-screen"
-				);
-				return;
-			}
-
-			// Ensure notification/external-overlay classification is up to date
-			// before notify_dropdown checks for conflicts with those windows.
-			let windows: Vec<_> = self.space.elements().cloned().collect();
-			self.classify_special_windows(&windows);
-
-			// Register the dropdown with the compositor state.
-			// This checks for conflicts with notification/external overlay windows.
-			// Do NOT give keyboard focus to the dropdown — keyboard focus
-			// stays on the previously focused window (keyboard focus
-			// persistence). Gamescope keeps keyboard focus on the main game
-			// window while dropdowns only receive pointer events.
-			let _ = self.notify_dropdown(win.clone(), location.x, location.y);
+			self.try_register_dropdown(&win, location);
 		} else if !is_dropdown {
 			// Non-dropdown override-redirect windows (STEAM_OVERLAY,
 			// notifications, external overlays) also need focus
@@ -2513,6 +2538,7 @@ impl XwmHandler for MoonshineCompositor {
 			self.reevaluate_focus();
 		}
 	}
+
 
 	fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
 		let unmapped_id = window.window_id();
@@ -2681,6 +2707,16 @@ impl XwmHandler for MoonshineCompositor {
 			if meta.flags != old_flags {
 				self.focus_state.mark_dirty();
 			}
+		}
+
+		// An override-redirect popup is often mapped at a degenerate 1x1 stub
+		// and only reaches its real size via this configure — re-check dropdown
+		// registration now that `meta.geometry` reflects the real size, or a
+		// resized/repositioned dropdown (e.g. a submenu growing) would never be
+		// picked up otherwise. See `try_register_dropdown` for why this can't
+		// just be done once at map time.
+		if window.is_override_redirect() {
+			self.try_register_dropdown(&elem, geometry.loc);
 		}
 	}
 
