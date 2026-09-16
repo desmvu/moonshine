@@ -64,10 +64,6 @@ use crate::session::compositor::frame::{ExportedFrame, ExportedPlane, FrameColor
 /// `sync_channel(2)` and one is being processed by the encoder.
 const BUFFER_POOL_SIZE: usize = 3;
 
-#[cfg(test)]
-#[path = "test_state.rs"]
-mod test_state;
-
 /// A pre-allocated GBM buffer slot in the compositor's buffer pool.
 pub(crate) struct GbmBufferSlot {
 	/// The exported DMA-BUF kept alive for the lifetime of the pool.
