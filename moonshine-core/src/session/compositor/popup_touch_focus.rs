@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use smithay::backend::input::TouchSlot;
+use smithay::backend::input::{InputTime, TouchSlot};
 use smithay::input::Seat;
 use smithay::input::dnd::{DndFocus, Source};
 use smithay::input::touch::{DownEvent, FrameMarker, MotionEvent, OrientationEvent, ShapeEvent, TouchTarget, UpEvent};
@@ -99,6 +99,10 @@ impl TouchTarget<MoonshineCompositor> for TouchFocusTarget {
 	fn orientation(&self, seat: &Seat<MoonshineCompositor>, data: &mut MoonshineCompositor, event: &OrientationEvent) {
 		TouchTarget::orientation(&self.0, seat, data, event);
 	}
+
+	fn last_frame(&self, seat: &Seat<MoonshineCompositor>, data: &mut MoonshineCompositor) -> Option<FrameMarker> {
+		TouchTarget::last_frame(&self.0, seat, data)
+	}
 }
 
 // The seat also participates in Smithay's native and XWayland drag-and-drop
@@ -124,7 +128,7 @@ impl DndFocus<MoonshineCompositor> for TouchFocusTarget {
 		offer: Option<&mut Self::OfferData<S>>,
 		seat: &Seat<MoonshineCompositor>,
 		location: Point<f64, Logical>,
-		time: u32,
+		time: InputTime,
 	) {
 		DndFocus::motion(&self.0, data, offer, seat, location, time);
 	}
